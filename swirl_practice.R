@@ -138,7 +138,7 @@ hist(mtcars$mpg)
 ## dplyr
 library(dplyr)
 read.csv(path2csv, stringsAsFactors = FALSE)
-cran <- tbl_df(mydf) # table dataframe - nicer to print
+cran <- tbl_df(mydf) # table dataframe - nicer to print, tibble
 #select(), filter(), arrange(), mutate(), and summarize()
 select(cran, ip_id, package, country) # select dataframe, then columns in this order
 select(cran, r_arch:country)
@@ -209,3 +209,16 @@ students3 %>%
 
 #union
 bind_rows(passed, failed)
+
+
+## Dates and Times with Lubridate
+this_day <- today()
+this_moment <- now()
+now("America/New_York")
+wday(this_day) #numbered day of the week
+ymd("1989-05-17")
+dmy(25081985)
+ymd_hms("2014-08-23 17:23:02")
+update(this_moment, hours = 8, minutes = 34, seconds = 55)
+
+now("America/New_York") + days(2)
