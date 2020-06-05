@@ -1,0 +1,98 @@
+---
+title: "Varying Coefficient Model"
+author: "Spencer Braun"
+date: "6/5/2020"
+output: html_document
+---
+
+
+```{r, message=FALSE}
+library(tidyverse)
+library(reshape2)
+library(ggplot2)
+library(e1071)
+library(MASS)
+library(mvtnorm)
+library(glmnet)
+library(splines)
+library(gam)
+library(here)
+```
+
+* Build a natural cubic spline basis for the time data. 
+* Coefficients of $x_1,x_2$ as a function of the splines, $\beta=\mathbf{H} \theta$ for the basis matrix H of natural cubic splines 
+* Fit a regression on the filtered data $x^* = H^Tx$, which gives us the value of $\hat{\theta}$, the regression coefficients on the filtered x values 
+* Calculate the smooth coefficient curves from $\hat{\beta}(t)=h(t)^T \hat{\theta}$. Since the H matrix is a basis with respect to t, we end up with coefficients that vary as a function of time.
+
+```{r, message=FALSE, warning=FALSE}
+
+vcdata <- read_csv(here::here("data", "vcdata.csv"))
+vcdata <- vcdata %>% dplyr::select(- X1)
+
+## Create spline basis
+df = 10
+N <- ns(vcdata$t, df = 10, intercept = TRUE)
+
+## Create theta esimates
+X <- as.data.frame(cbind(rep(1, nrow(vcdata)), vcdata$x.1, vcdata$x.2))
+colnames(X) <- c("int", "X1", "X2")
+fit <- lm(vcdata$y ~ N:(int + X1 + X2) - 1, data=X)
+coef <- fit$coefficients
+
+# plot(vcdata$t, vcdata$y, type='l')
+# lines(vcdata$t, predict(fit), type='l', col='red')
+
+## Transform to beta's
+coef_transform = function(coef, index_range) N %*% coef[index_range]
+
+t_int <- coef_transform(coef, seq(1, length=df))
+tb_1 <- coef_transform(coef, seq(df + 1, length=df))
+tb_2 <- coef_transform(coef, seq(2*df + 1, length=df))
+y_hat <- t_int + (tb_1 * vcdata$x.1) + (tb_2 * vcdata$x.2)
+
+coef_matrix <- data.frame(Time= vcdata$t, Int = t_int, B1 = tb_1, B2 =tb_2)
+tidy_coef <- melt(coef_matrix, id="Time")
+
+tidy_coef %>% ggplot(aes(x = Time, y = value, colour = variable)) +
+  geom_line() + 
+  ggtitle("Coefficient Values vs Time") + xlab("Time") + 
+  ylab("Coefficient Vals") +
+  theme_bw()
+```
+
+
+```{r}
+
+cov <- vcov(fit)
+covTransform <- function(index_range) {
+  sqrt(diag(N %*% cov[index_range,index_range] %*% t(N)))
+}
+
+intCov <- covTransform(seq(1, length=df))
+b1Cov <- covTransform(seq(df + 1, length=df))
+b2Cov <- covTransform(seq(2*df + 1, length=df))
+
+combineDfs <- function(coef, se) {
+  cbind(time=coef_matrix$Time, 
+        var=rep(coef, 500), 
+        value=unname(coef_matrix[coef]),
+        se=se)  
+}
+
+ptErrors <- as.data.frame(
+  rbind(
+  combineDfs('Int', intCov),
+  combineDfs('B1', b1Cov),
+  combineDfs('B2', b2Cov)
+  ))
+
+ptErrors %>% ggplot(aes(x = time, y = value)) +
+  geom_line(aes(color = var, group = var)) +
+  geom_errorbar(aes(ymin = value - 2*se, ymax = value + 2*se, color = var), 
+                alpha=0.3) +
+  ggtitle("Coefficient Values with Pointwise SEs") + xlab("Time") + 
+  ylab("Coefficient Vals") +
+  theme_bw()
+
+```
+

@@ -1,0 +1,126 @@
+---
+title: "Curse of Dimensionality"
+author: "Spencer Braun"
+date: "6/5/2020"
+output: html_document
+---
+
+```{r}
+library(class)
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+```
+
+
+```{r}
+
+set.seed(456)
+
+# generate uniform x
+cube <- function(p) {
+  x_vects <- matrix(0,1000,p)
+  for (i in 1:p) {
+    x_vects[,i] = runif(1000, -0.5, 0.5)
+  }
+  return(x_vects)
+}
+
+custom_norm <- function(X, p) {
+  if (p == 1) {
+    return(rep(0, nrow(X)))
+  }
+  return(apply(X[,1:floor(p/2), drop=FALSE], 1, function(x) sum(x^2)))
+}
+
+# calculate Y and create X,Y df
+Y_func <- function(p) {
+  X <- cube(p)
+  Y <- exp(-8 * custom_norm(X, p))
+  data <- as.data.frame(cbind(X,Y))
+  names(data) <- c(sapply(seq(1,p), function(x) return(str_interp("X${x}"))), "Y")
+  return(data)
+}
+
+# Run 100 sims and calc MSE, Bias, Variance
+iterate_sims <- function(p, eqn_func, reps=100) {
+  estimates <- rep(0,reps)
+  for (i in 1:reps) {
+    train <- eqn_func(p)
+    test.X <- rep(0, ncol(train)-1)
+    train.X <- as.matrix(train[,-ncol(train)])
+    knn.pred <- knn(train.X,test.X,train$Y,k=1)
+    estimate <- as.numeric(as.vector(knn.pred))
+    estimates[i] <- estimate
+  }
+  mse <- mean((estimates - 1)^2)
+  sq_bias <- (mean(estimates) - 1)^2
+  variance <- mean((estimates - mean(estimates))^2)
+  return(c(mse, sq_bias, variance))
+}
+
+#Run for p in 1,...,20
+dim_matrix <- matrix(0, 20, 4)
+for (p in 1:20) {
+  mse_stats <- iterate_sims(p, Y_func)
+  dim_matrix[p,] <- c(p, mse_stats)
+}
+
+dim_df <- as.data.frame(dim_matrix)
+names(dim_df) <- c("Dimension", "MSE", "Sq_Bias", "Variance")
+dim_tidy <- melt(dim_df, id=c("Dimension"))
+
+dim_tidy %>% ggplot(aes(x=Dimension, y=value, colour=variable)) +
+  geom_point() + geom_line() +
+  scale_colour_manual(values=c("red","blue","dark green")) +
+  scale_x_continuous(breaks = seq(2,20, by=2), limits = c(1, 20)) +
+  ylab("MSE") + theme_bw() +
+  ggtitle("2C: MSE vs. Dimension for 1-NN Prediction on Simulated Data")
+```
+
+
+Here we see the MSE and squared bias increase substantially as dimensions increase, but the variance rises slightly before falling again. Considering the form of f(x), this makes sense. As $||X||_*^2 \rightarrow \infty$, $Y = e^{-8||X||_*^2} \rightarrow 0$. For training points near our test point, the origin, the variance is quite small when our function's value declines to a infinitessimal quantity. Small changes in the choice of nearest neighbor to the origin has little effect on the prediction of y in the limit.
+
+
+```{r}
+
+set.seed(123)
+
+# Sum instead of custom norm
+sum_func <- function(X, p) {
+  if (p == 1) {
+    return(rep(0, nrow(X)))
+  }
+  return(apply(X[,1:floor(p/2), drop=FALSE], 1, sum))
+}
+
+# Generate X,Y using new definition of Y
+Y_alternate <- function(p) {
+  X <- cube(p)
+  Y <- exp(sum_func(X, p))
+  data <- as.data.frame(cbind(X,Y))
+  names(data) <- c(sapply(seq(1,p), function(x) return(str_interp("X${x}"))),"Y")
+  return(data)
+}
+
+#Run for p in 1,...,20
+dim_d_matrix <- matrix(0, 20, 4)
+for (p in 1:20) {
+  mse_stats <- iterate_sims(p, Y_alternate)
+  dim_d_matrix[p,] <- c(p,mse_stats)
+}
+
+dim_d_df <- as.data.frame(dim_d_matrix)
+names(dim_d_df) <- c("Dimension", "MSE", "Sq_Bias", "Variance")
+dim_d_tidy <- melt(dim_d_df, id=c("Dimension"))
+
+dim_d_tidy %>% ggplot(aes(x=Dimension, y=value, colour=variable)) +
+  geom_point() + geom_line() +
+  scale_colour_manual(values=c("red","blue","dark green")) +
+  scale_x_continuous(breaks = seq(2,20, by=2), limits = c(1, 20)) +
+  ylab("MSE") + theme_bw() +
+  ggtitle("2D: MSE vs. Dimension for 1-NN Prediction on Simulated Data")
+
+```
+
+This plot shows very different behavior - while the MSE still generally increases with dimensionality, it is driven by large increases in variance while the squared bias climbs slowly. Our function is quite different here and as $X \rightarrow \infty,\; Y= e^{f(X)} \rightarrow \infty$ since we are taking positive powers of e. Nearest neighbors is following the limiting behavior of our function, and small differences in x values can lead to highly variable y value predictions.

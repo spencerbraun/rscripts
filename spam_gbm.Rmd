@@ -1,0 +1,293 @@
+---
+title: "Spam GBM"
+author: "Spencer Braun"
+date: "6/5/2020"
+output: html_document
+---
+
+```{r, message=FALSE, echo=FALSE}
+if (!require("pacman")) install.packages("pacman")
+
+pacman::p_load(tidyverse) 
+pacman::p_load(here) 
+pacman::p_load(glue) 
+pacman::p_load(gbm) 
+pacman::p_load(rsample) 
+pacman::p_load(ROCR) 
+pacman::p_load(viridis)
+```
+
+
+```{r}
+spam.train <- readr::read_csv(here::here("data", "spam_train.csv"))
+spam.test <- readr::read_csv(here::here("data", "spam_test.csv"))
+
+columns <- c('word_freq_make',
+'word_freq_address',
+'word_freq_all',
+'word_freq_3d',
+'word_freq_our',
+'word_freq_over',
+'word_freq_remove',
+'word_freq_internet',
+'word_freq_order',
+'word_freq_mail',
+'word_freq_receive',
+'word_freq_will',
+'word_freq_people',
+'word_freq_report',
+'word_freq_addresses',
+'word_freq_free',
+'word_freq_business',
+'word_freq_email',
+'word_freq_you',
+'word_freq_credit',
+'word_freq_your',
+'word_freq_font',
+'word_freq_000',
+'word_freq_money',
+'word_freq_hp',
+'word_freq_hpl',
+'word_freq_george',
+'word_freq_650',
+'word_freq_lab',
+'word_freq_labs',
+'word_freq_telnet',
+'word_freq_857',
+'word_freq_data',
+'word_freq_415',
+'word_freq_85',
+'word_freq_technology',
+'word_freq_1999',
+'word_freq_parts',
+'word_freq_pm',
+'word_freq_direct',
+'word_freq_cs',
+'word_freq_meeting',
+'word_freq_original',
+'word_freq_project',
+'word_freq_re',
+'word_freq_edu',
+'word_freq_table',
+'word_freq_conference',
+'char_freq_semi_col',
+'char_freq_paren',
+'char_freq_bracket',
+'char_freq_excl_pt',
+'char_freq_dlr_sign',
+'char_freq_pound',
+'capital_run_length_average',
+'capital_run_length_longest',
+'capital_run_length_total',
+'spam_label')
+
+names(spam.train) <- columns
+names(spam.test) <- columns
+
+set.seed(123)
+rows <- sample(nrow(spam.train))
+spam.train <- spam.train[rows, ]
+```
+
+
+## Initial Trial
+
+Fit simple GBM to predict spam
+```{r}
+set.seed(123)
+gbm0 <- gbm(spam_label ~ ., data=spam.train, train.fraction=1, interaction.depth=4,
+         shrinkage=.05, n.trees=2500, bag.fraction=0.5, cv.folds=5, 
+         distribution="bernoulli", verbose=F)
+```
+
+
+```{r}
+print(gbm0)
+```
+
+```{r}
+min(gbm0$cv.error)
+```
+
+```{r}
+gbm0.best <- gbm.perf(gbm0, method = "cv")
+```
+
+Checking error rate on training data
+```{r}
+gbm0_train.pred <- predict(gbm0, spam.train, type="response", n.trees=gbm0.best)
+gbm0_train.class <- ifelse(gbm0_train.pred > 0.5, 1, 0)
+mean(gbm0_train.class != spam.train$spam_label)
+```
+
+
+Error rate on test data
+```{r}
+gbm0.predict <- predict(gbm0, spam.test, type="response", n.trees=gbm0.best)
+
+
+par(mfrow=c(1,2))
+hist(gbm0.predict)
+pred0 <- prediction(gbm0.predict, spam.test$spam_label)
+perf0 <- performance(pred0,"tpr","fpr")
+plot(perf0, colorize=FALSE, main="ROC for Spam Test")
+```
+
+
+```{r}
+
+gbm0.class <- ifelse(gbm0.predict > 0.5, 1, 0)
+
+confusion.test <- table(gbm0.class, spam.test$spam_label)
+confusion.test
+
+
+misclass.test <- mean(gbm0.class != spam.test$spam_label)
+misclass.test
+```
+
+On the test data, there is a ~`r round(misclass.test, 4)*100`% misclassification rate. The confusion table indicates that of the `r sum(confusion.test[,2])` true spam emails, `r round(confusion.test[1,2]/sum(confusion.test[,2]),4)*100`% were misclassified as not spam. Of the `r sum(confusion.test[,1])` non-spam emails, `r round(confusion.test[2,1]/sum(confusion.test[,1]),4)*100`% were misclassified as spam.
+
+
+
+
+
+
+## Restrict to FP rate of 0.3%
+
+Perform search over different weights in GBM to get closest to 0.3% goal.
+
+```{r, eval=FALSE}
+set.seed(123)
+
+weights <- c(40,50,60)
+pb <- txtProgressBar(min = 1, max = length(weights), style = 3)
+results <- matrix(NA, length(weights),2)
+
+for (i in 1:length(weights)) {
+  
+  ## Try different weight vector values
+  w <- ifelse(spam.train$spam_label == 1, 1, weights[i])
+  
+  gbm.weight <- gbm(spam_label ~ .,
+                    data = spam.train, 
+                    train.fraction = 1,
+                    interaction.depth = 4, 
+                    shrinkage = 0.05,
+                    n.trees = 1000, 
+                    bag.fraction = 0.5, 
+                    cv.folds = 5,
+                    distribution = 'bernoulli', 
+                    verbose = F,
+                    weights = w)
+  
+  best.weight <- gbm.perf(gbm.weight, method = "cv", plot.it = FALSE)
+  pred.weight = ifelse(predict(gbm.weight, spam.test, type = 'response', n.trees = best.weight) > 0.5,
+                       1,0)
+  thresh.table <- table(pred.weight, spam.test$spam_label)
+  results[i,1] <- weights[i]
+  results[i,2] <- round(thresh.table[2,1]/sum(thresh.table[,1]),4)*100
+  setTxtProgressBar(pb, i)
+  
+}
+
+results
+```
+
+
+Use best weighted tree and threshold to get below 0.3%
+
+```{r}
+set.seed(123)
+
+w <- ifelse(spam.train$spam_label == 1, 1, 40)
+  
+gbm.weight <- gbm(spam_label ~ .,
+                  data = spam.train, 
+                  train.fraction = 1,
+                  interaction.depth = 4, 
+                  shrinkage = 0.05,
+                  n.trees = 1000, 
+                  bag.fraction = 0.5, 
+                  cv.folds = 5,
+                  distribution = 'bernoulli', 
+                  verbose = F,
+                  weights = w)
+
+
+best.weight <- gbm.perf(gbm.weight, method = "cv", plot.it = FALSE)
+pred.weight = ifelse(predict(gbm.weight, spam.test, 
+                             type = 'response', n.trees = best.weight) > 0.5,
+                     1,0)
+thresh.table <- table(pred.weight, spam.test$spam_label)
+best.error <- round(thresh.table[2,1]/sum(thresh.table[,1]),4)*100
+best.error
+
+pred.weight <- predict(gbm.weight, spam.test, type="response", 
+                       n.trees=best.weight)
+pred1 <- prediction(pred.weight, spam.test$spam_label)
+perf1 <- performance(pred1,"tpr","fpr")
+plot(perf1, colorize=FALSE, main="ROC for Spam Test")
+```
+
+```{r}
+roc_df <- data.frame(cut=perf1@alpha.values[[1]], 
+                      fpr=perf1@x.values[[1]], 
+                      tpr=perf1@y.values[[1]])
+roc_df <- roc_df %>% 
+  arrange(desc(tpr)) %>%
+  filter(fpr < 0.003)
+
+thresh.class <- ifelse(pred.weight >= roc_df[1,'cut'], 1, 0)
+```
+
+
+```{r}
+thresh.misclass <- mean(thresh.class != spam.test$spam_label)
+thresh.misclass
+
+thresh.table <- table(thresh.class, spam.test$spam_label)
+thresh.table
+```
+
+The misclassification error is now `r round(thresh.misclass, 4) * 100`% on the test dataset. of the `r sum(thresh.table[,2])` true spam emails, `r round(thresh.table[1,2]/sum(thresh.table[,2]),4)*100`% were misclassified as not spam. Of the `r sum(thresh.table[,1])` non-spam emails, `r round(thresh.table[2,1]/sum(thresh.table[,1]),4)*100`% were misclassified as spam.
+
+## Variable importance
+
+```{r}
+weight.sum <- summary(gbm.weight,main="Relative Influence", 
+                    cBars = 10,
+                    method = relative.influence,
+                    las = 1)
+head(weight.sum, n=10)
+```
+
+
+## Partial Dependence
+
+```{r, message=FALSE}
+best.iter <- gbm.perf(gbm.weight, method="OOB", plot.it=FALSE)
+```
+
+```{r}
+partial_dep <- function(model, var_names, trees) {
+  var_nums <- which(model$var.names %in% var_names)
+  title <- glue("Partial Dependence of ", paste(model$var.names[var_nums], collapse=', '))
+  plot(x=model, i.var=var_nums, n.trees=trees, main=title)
+}
+
+
+partial_dep(gbm.weight, c('char_freq_excl_pt'), best.iter)
+```
+
+
+```{r}
+partial_dep(gbm.weight, c('char_freq_dlr_sign'), best.iter)
+```
+
+
+
+```{r}
+partial_dep(gbm.weight, c('word_freq_remove'), best.iter)
+```
+
