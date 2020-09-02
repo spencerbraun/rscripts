@@ -22,6 +22,9 @@ pacman::p_load(glue)
 pacman::p_load(class) 
 pacman::p_load(nnet) 
 pacman::p_load(ROCR) 
+pacman::p_load(hrbrthemes)
+
+theme_set(hrbrthemes::theme_ipsum())
 ```
 
 

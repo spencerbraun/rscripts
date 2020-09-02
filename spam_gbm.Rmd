@@ -2,7 +2,14 @@
 title: "Spam GBM"
 author: "Spencer Braun"
 date: "6/5/2020"
-output: html_document
+output: 
+  html_document:
+    highlight: haddock
+    theme: journal
+    number_sections: no
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
 ---
 
 ```{r, message=FALSE, echo=FALSE}
@@ -15,10 +22,13 @@ pacman::p_load(gbm)
 pacman::p_load(rsample) 
 pacman::p_load(ROCR) 
 pacman::p_load(viridis)
+pacman::p_load(hrbrthemes)
+
+theme_set(hrbrthemes::theme_ipsum())
 ```
 
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 spam.train <- readr::read_csv(here::here("data", "spam_train.csv"))
 spam.test <- readr::read_csv(here::here("data", "spam_test.csv"))
 

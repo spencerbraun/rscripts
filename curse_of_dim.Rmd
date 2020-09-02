@@ -2,14 +2,22 @@
 title: "Curse of Dimensionality"
 author: "Spencer Braun"
 date: "6/5/2020"
-output: html_document
+output: 
+  html_document:
+    highlight: haddock
+    theme: journal
+    number_sections: no
+    toc: no
 ---
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 library(class)
 library(tidyverse)
 library(ggplot2)
 library(reshape2)
+library(hrbrthemes)
+
+theme_set(hrbrthemes::theme_ipsum())
 ```
 
 
